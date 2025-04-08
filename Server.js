@@ -3,6 +3,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+const twilio = require("twilio");
 require("dotenv").config(); // Ensure this line loads the .env file
 
 const app = express();
@@ -44,6 +45,11 @@ const FormSchema = new mongoose.Schema({
 
 const Form = mongoose.model("Form", FormSchema);
 
+// Twilio Setup
+const accountSid = process.env.TWILIO_ACCOUNT_SID; // Twilio Account SID
+const authToken = process.env.TWILIO_AUTH_TOKEN; // Twilio Auth Token
+const client = twilio(accountSid, authToken);
+
 // API Endpoint
 app.post("/Form", async (req, res) => {
   try {
@@ -56,12 +62,20 @@ app.post("/Form", async (req, res) => {
     const newFormSubmission = new Form({ name, emailPhone, message });
     await newFormSubmission.save();
 
-    res.status(200).json({ message: "Form submitted successfully." });
+    // Send SMS notification for form submission
+    await client.messages.create({
+      body: `New Form Submission:\nName: ${name}\nMessage: ${message}`,
+      from: process.env.TWILIO_PHONE_NUMBER_NOTIFICATION, // Notification number
+      to: process.env.NOTIFICATION_PHONE_NUMBER, // Admin or recipient's phone number
+    });
+
+    res.status(200).json({ message: "Form submitted successfully and SMS notification sent!" });
   } catch (error) {
-    console.error("Error saving form submission:", error);
+    console.error("Error saving form submission or sending SMS:", error);
     res.status(500).json({ message: "An error occurred. Please try again." });
   }
 });
+
 
 app.get("/Display", async (req, res) => {
   try {
@@ -78,3 +92,4 @@ app.get("/Display", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
+
