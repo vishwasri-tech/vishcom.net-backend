@@ -29,29 +29,35 @@ jobs:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
           USER: ubuntu
+          ENTRY_FILE: Server.js   # <-- replace with your case-sensitive backend entry file
         run: |
-          # Save SSH key to file
+          # Save SSH key
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
 
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           RELEASE_DIR=/var/www/backend/releases/$TIMESTAMP
 
-          echo "🚀 Creating release folder $RELEASE_DIR"
+          echo "🚀 Creating release folder"
           ssh -i private_key.pem -o StrictHostKeyChecking=no $USER@$HOST "mkdir -p $RELEASE_DIR"
 
-          echo "📂 Uploading backend files"
-          scp -i private_key.pem -o StrictHostKeyChecking=no -r * $USER@$HOST:$RELEASE_DIR
+          echo "📂 Uploading backend files (excluding node_modules and .git)"
+          rsync -avz --exclude 'node_modules' --exclude '.git' ./ $USER@$HOST:$RELEASE_DIR
 
-          echo "🔗 Updating symlink to latest release"
-          ssh -i private_key.pem -o StrictHostKeyChecking=no $USER@$HOST "ln -sfn $RELEASE_DIR /var/www/backend/current"
-
-          echo "🔄 Restarting backend with PM2"
-          ssh -i private_key.pem -o StrictHostKeyChecking=no $USER@$HOST "cd /var/www/backend/current && pm2 restart server || pm2 start server.js --name backend"
-
-          echo "🗑 Cleaning old releases (keep last 5)"
+          echo "🔗 Updating symlink and restarting backend with PM2"
           ssh -i private_key.pem -o StrictHostKeyChecking=no $USER@$HOST "
-            cd /var/www/backend/releases &&
+            cd /var/www/backend/current || mkdir -p /var/www/backend/current
+            ln -sfn $RELEASE_DIR /var/www/backend/current
+
+            cd /var/www/backend/current
+            if pm2 describe backend > /dev/null 2>&1; then
+              pm2 restart backend --update-env
+            else
+              pm2 start $ENTRY_FILE --name backend
+            fi
+
+            # Cleanup old releases (keep last 5)
+            cd /var/www/backend/releases
             ls -1t | tail -n +6 | xargs -I {} rm -rf {} || true
           "
 
