@@ -1,0 +1,58 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout backend repo
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      # 2️⃣ Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      # 3️⃣ Install dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # 4️⃣ Deploy to EC2
+      - name: Deploy to EC2
+        env:
+          PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ubuntu
+        run: |
+          # Save SSH key to file
+          echo "$PRIVATE_KEY" > private_key.pem
+          chmod 600 private_key.pem
+
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          RELEASE_DIR=/var/www/backend/releases/$TIMESTAMP
+
+          echo "🚀 Creating release folder $RELEASE_DIR"
+          ssh -i private_key.pem -o StrictHostKeyChecking=no $USER@$HOST "mkdir -p $RELEASE_DIR"
+
+          echo "📂 Uploading backend files"
+          scp -i private_key.pem -o StrictHostKeyChecking=no -r * $USER@$HOST:$RELEASE_DIR
+
+          echo "🔗 Updating symlink to latest release"
+          ssh -i private_key.pem -o StrictHostKeyChecking=no $USER@$HOST "ln -sfn $RELEASE_DIR /var/www/backend/current"
+
+          echo "🔄 Restarting backend with PM2"
+          ssh -i private_key.pem -o StrictHostKeyChecking=no $USER@$HOST "cd /var/www/backend/current && pm2 restart server || pm2 start server.js --name backend"
+
+          echo "🗑 Cleaning old releases (keep last 5)"
+          ssh -i private_key.pem -o StrictHostKeyChecking=no $USER@$HOST "
+            cd /var/www/backend/releases &&
+            ls -1t | tail -n +6 | xargs -I {} rm -rf {} || true
+          "
+
+          echo "✅ Backend deployed successfully!"
